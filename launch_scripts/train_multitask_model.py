@@ -133,6 +133,8 @@ if __name__ == "__main__":
     parser.add_argument("--device_train_batch_size", default=4, type=int)
     parser.add_argument("--include_image", action="store_true",
                         help="Include image in the evaluation outputs")
+    parser.add_argument("--egodex-data-percentage", default=1.0, type=float,
+                       help="Percentage of EgoDex data to use (0.0 to 1.0) for ablation studies")
     parser.add_argument("--turn_off_inference", action="store_true",
                         help="Turn off inference during training")
     parser.add_argument("--max_crops", default=8, type=int)
@@ -266,6 +268,58 @@ if __name__ == "__main__":
             ], 1.0],
             ["molmoact_dataset_tabletop_secondary", [
                 "molmoact_dataset_tabletop_secondary",
+            ], 1.0],
+        ]
+    elif args.mixture in ["molmoact-midtrain-egodex"]:
+        # Mid-training with EgoDex dataset included
+        tasks = [
+            ["molmoact_dataset_home_primary", [
+                "molmoact_dataset_home_primary",
+            ], 0.8],
+            ["molmoact_dataset_home_secondary", [
+                "molmoact_dataset_home_secondary",
+            ], 0.8],
+            ["molmoact_dataset_tabletop_primary", [
+                "molmoact_dataset_tabletop_primary",
+            ], 0.8],
+            ["molmoact_dataset_tabletop_secondary", [
+                "molmoact_dataset_tabletop_secondary",
+            ], 0.8],
+            ["egodex_train", [
+                "egodex_train",
+            ], 1.0],
+        ]
+    elif args.mixture in ["egodex-only"]:
+        # EgoDex only training
+        tasks = [
+            ["egodex_train", [
+                "egodex_train",
+            ], 1.0],
+        ]
+    elif args.mixture in ["egodex-pose-only"]:
+        # EgoDex pose-based actions only training
+        tasks = [
+            ["egodex_pose_train", [
+                "egodex_pose_train",
+            ], 1.0],
+        ]
+    elif args.mixture in ["molmoact-midtrain-egodex-pose"]:
+        # Mid-training with EgoDex pose-based actions
+        tasks = [
+            ["molmoact_dataset_home_primary", [
+                "molmoact_dataset_home_primary",
+            ], 0.8],
+            ["molmoact_dataset_home_secondary", [
+                "molmoact_dataset_home_secondary",
+            ], 0.8],
+            ["molmoact_dataset_tabletop_primary", [
+                "molmoact_dataset_tabletop_primary",
+            ], 0.8],
+            ["molmoact_dataset_tabletop_secondary", [
+                "molmoact_dataset_tabletop_secondary",
+            ], 0.8],
+            ["egodex_pose_train", [
+                "egodex_pose_train",
             ], 1.0],
         ]
     elif args.mixture in ["libero-spatial"]:

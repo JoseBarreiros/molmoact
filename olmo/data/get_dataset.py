@@ -18,6 +18,10 @@ import itertools
 import os
 
 from olmo.data.robot_datasets import *
+from olmo.data.egodex_dataset import (
+    EgoDexDataset, EgoDexTrain, EgoDexTest, EgoDexAdditional,
+    EgoDexPoseActions, EgoDexPoseActionsTrain, EgoDexPoseActionsTest, EgoDexPoseActionsAdditional
+)
 from olmo.data.lvis_dataset import LVIS
 
 
@@ -229,5 +233,33 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
     if "libero_long" in dataset_name:
         return LIBEROLong(split="train", style="demo")
     
+    # EgoDex datasets
+    if "egodex_train" in dataset_name:
+        # Extract data directory from environment variable or use default
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexTrain(data_dir=data_dir, style="demo", width=320, height=240)
+    if "egodex_test" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexTest(data_dir=data_dir, style="demo", width=320, height=240)
+    if "egodex_additional" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexAdditional(data_dir=data_dir, style="demo", width=320, height=240)
+    if "egodex" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexDataset(data_dir=data_dir, split=split, style="demo", width=320, height=240)
+    
+    # EgoDex pose-based action datasets (treating hand poses as robot actions)
+    if "egodex_pose_train" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexPoseActionsTrain(data_dir=data_dir, style="demo", width=320, height=240, action_sequence_length=8)
+    if "egodex_pose_test" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexPoseActionsTest(data_dir=data_dir, style="demo", width=320, height=240, action_sequence_length=8)
+    if "egodex_pose_additional" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexPoseActionsAdditional(data_dir=data_dir, style="demo", width=320, height=240, action_sequence_length=8)
+    if "egodex_pose" in dataset_name:
+        data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
+        return EgoDexPoseActions(data_dir=data_dir, split=split, style="demo", width=320, height=240, action_sequence_length=8)
 
     raise NotImplementedError(dataset_name, split)

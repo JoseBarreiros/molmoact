@@ -23,6 +23,10 @@ import numpy as np
 from PIL import Image
 
 from olmo.data.dataset import Dataset, HfDataset
+from olmo.data.egodex_dataset import (
+    EgoDexDataset, EgoDexTrain, EgoDexTest, EgoDexAdditional,
+    EgoDexPoseActions, EgoDexPoseActionsTrain, EgoDexPoseActionsTest, EgoDexPoseActionsAdditional
+)
 
 
 # --------------------------
@@ -401,4 +405,8 @@ __all__ = [
     "MolmoActDatasetTabletopPrimary", "MolmoActDatasetTabletopSecondary",
     # Libero wrappers
     "LIBEROSpatial", "LIBEROObject", "LIBEROGoal", "LIBEROLong",
+    # EgoDex wrappers
+    "EgoDexDataset", "EgoDexTrain", "EgoDexTest", "EgoDexAdditional",
+    # EgoDex pose-based action wrappers
+    "EgoDexPoseActions", "EgoDexPoseActionsTrain", "EgoDexPoseActionsTest", "EgoDexPoseActionsAdditional",
 ]

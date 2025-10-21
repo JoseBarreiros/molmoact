@@ -1,0 +1,141 @@
+ARG UBUNTU_VERSION=22.04
+ARG TARGET_PLATFORM=x86_64
+ARG CUDA_VERSION=12.4.0
+ARG CUDA_VERSION_PATH=cu124
+ARG PYTHON_VERSION=3.11
+ARG BASE_IMAGE=ubuntu:${UBUNTU_VERSION}
+ARG DEVEL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+
+#########################################################################
+# Build image
+#########################################################################
+
+FROM ${DEVEL_BASE_IMAGE} as build
+
+WORKDIR /app/build
+
+# Install system dependencies.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        wget \
+        libxml2-dev \
+        libjpeg-dev \
+        libpng-dev \
+        gcc \
+        git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda
+RUN curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" && \
+    chmod +x ~/miniconda.sh && \
+    bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+
+# Add conda to PATH
+ENV PATH="/opt/conda/bin:${PATH}"
+
+# Install Python and pip
+RUN conda install -y python=${PYTHON_VERSION} pip
+
+# Install PyTorch with CUDA support
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu124 \
+    torch>=2.3.1 \
+    torchvision>=0.18.1 \
+    torchaudio
+
+# Install additional dependencies
+RUN pip install --no-build-isolation --no-cache-dir \
+    transformers==4.52.3 \
+    datasets \
+    huggingface_hub \
+    tokenizers \
+    accelerate \
+    safetensors \
+    einops \
+    einops-exts \
+    imageio \
+    imageio[pyav] \
+    decord \
+    av \
+    moviepy \
+    opencv-python-headless \
+    h5py \
+    pillow \
+    numpy \
+    omegaconf \
+    rich \
+    boto3 \
+    google-cloud-storage \
+    sentencepiece \
+    requests \
+    tqdm \
+    gcsfs==2023.9.2 \
+    peft \
+    cached_property \
+    fiddle \
+    packaging \
+    cached_path \
+    absl-py
+
+# Install direct dependencies, but not source code.
+COPY pyproject.toml .
+COPY olmo/__init__.py olmo/__init__.py
+COPY olmo/version.py olmo/version.py
+RUN pip install --no-cache-dir '.[all]' && \
+    pip uninstall -y ai2-molmoact && \
+    rm -rf *
+
+#########################################################################
+# Release image
+#########################################################################
+
+FROM ${BASE_IMAGE} as release
+
+WORKDIR /app
+
+# Install system dependencies.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        wget \
+        libxml2-dev \
+        libjpeg-dev \
+        libpng-dev \
+        gcc \
+        git \
+        python3 \
+        python3-pip \
+        python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda
+RUN curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" && \
+    chmod +x ~/miniconda.sh && \
+    bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+
+# Add conda to PATH
+ENV PATH="/opt/conda/bin:${PATH}"
+
+# Install Python and pip
+RUN conda install -y python=${PYTHON_VERSION} pip
+
+# Copy the installed packages from build stage
+COPY --from=build /opt/conda /opt/conda
+
+# Copy the source code
+COPY . .
+
+# Install the package in development mode
+RUN pip install -e .[all]
+
+# Set working directory
+WORKDIR /workspace
+
+# Default command
+CMD ["/bin/bash"]
+
+
