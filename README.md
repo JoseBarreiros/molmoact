@@ -39,7 +39,7 @@
 2. [Release Notes](#2-release-notes)  
  2.1 [Datasets](#21-datasets)  
  2.2 [Models](#22-models)  
-3. [Installation](#3-training-wip)  
+3. [Installation](#3-installation)  
 4. [Training (WIP)](#4-training-wip)  
  4.1 [Data Processing & Fine-tuning (WIP)](#41-data-processing--fine-tuning-post-training-wip)  
  4.2 [Training Replication](#42-training-replication)  
@@ -89,17 +89,119 @@ MolmoAct is a repository for training and using AI2’s open-sourced **Action Re
 
 ## 3. Installation
 
-We provide the `Dockerfile` to build the docker, where we ran all our training experiments on. We strongly recommand to build the same docker on your own and run training on that.
+### Docker Installation (Recommended)
 
-If you want to install environment on your own, first install python 3.11, then install [PyTorch](https://pytorch.org) according to the instructions specific to your operating system. 
-
-Next, in both cases, go to your working molmoact folder, and run:
+We provide the `Dockerfile` to build the docker, where we ran all our training experiments on. We strongly recommend to build the same docker on your own and run training on that.
 
 ```bash
 git clone https://github.com/allenai/molmoact.git
-cd molmo
+cd molmoact
+docker build -f Dockerfile.fixed -t molmoact .
+docker run --gpus all -it molmoact /bin/bash
+```
+
+### Virtual Environment Installation (Alternative)
+
+If you prefer to install in a virtual environment instead of Docker, follow these steps:
+
+#### Prerequisites
+
+- **Python 3.11** (recommended, officially supported)
+- **CUDA 12.4** (for GPU support)
+- **Ubuntu 20.04+** or **macOS**
+
+#### Step-by-Step Installation
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/allenai/molmoact.git
+cd molmoact
+```
+
+2. **Install Python 3.11 (if not already installed):**
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install python3.11 python3.11-venv python3.11-pip -y
+```
+
+**macOS:**
+```bash
+brew install python@3.11
+```
+
+3. **Create and activate virtual environment:**
+```bash
+python3.11 -m venv molmoact_env
+source molmoact_env/bin/activate
+```
+
+4. **Upgrade pip:**
+```bash
+pip install --upgrade pip
+```
+
+5. **Install PyTorch with CUDA support:**
+```bash
+# For CUDA 12.4 (recommended)
+pip install torch>=2.3.1 torchvision>=0.18.1 --index-url https://download.pytorch.org/whl/cu124
+
+# For CPU-only (not recommended for training)
+# pip install torch>=2.3.1 torchvision>=0.18.1
+```
+
+6. **Install MolmoAct:**
+```bash
 pip install -e .[all]
 ```
+
+7. **Install additional dependencies for EgoDex integration:**
+```bash
+pip install h5py opencv-python pillow psutil
+```
+
+8. **Verify installation:**
+```bash
+python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+python -c "import olmo; print('MolmoAct imported successfully')"
+python -c "from olmo.data.egodex_dataset import EgoDexPoseActions; print('EgoDex integration working')"
+```
+
+#### Activation and Usage
+
+**Every time you open a new terminal:**
+```bash
+cd /path/to/molmoact
+source molmoact_env/bin/activate
+```
+
+**Create an alias for easier switching:**
+```bash
+echo "alias activate_molmoact='cd /path/to/molmoact && source molmoact_env/bin/activate'" >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### System Requirements
+
+- **RAM**: 32GB+ recommended for training
+- **GPU**: NVIDIA GPU with 16GB+ VRAM (A100, L4, RTX 4090, etc.)
+- **Storage**: 500GB+ free space for datasets
+
+#### Troubleshooting
+
+**CUDA Issues:**
+- Verify CUDA installation: `nvidia-smi`
+- Check PyTorch CUDA support: `python -c "import torch; print(torch.cuda.is_available())"`
+- Restart terminal after CUDA installation
+
+**Import Errors:**
+- Ensure virtual environment is activated: `which python` should point to `molmoact_env/bin/python`
+- Reinstall if needed: `pip install -e .[all] --force-reinstall`
+
+**Memory Issues:**
+- Reduce batch size in training scripts
+- Use gradient checkpointing for large models
 ---
 
 ## 4. Training (WIP)
@@ -219,6 +321,8 @@ WANDB_API_KEY=<your_wandb_api_key> torchrun \
 ---
 
 #### 4.2.2 Mid-training
+
+> **Note**: For EgoDex integration, you can use `molmoact-midtrain-egodex-pose` or `egodex-pose-only` as the mixture name to train with EgoDex data. See `EGODEX_INTEGRATION.md` for detailed instructions.
 
 **Command**
 ```bash
