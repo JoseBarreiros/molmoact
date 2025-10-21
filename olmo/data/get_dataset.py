@@ -251,7 +251,9 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
     # EgoDex pose-based action datasets (treating hand poses as robot actions)
     if "egodex_pose_train" in dataset_name:
         data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
-        return EgoDexPoseActionsTrain(data_dir=data_dir, style="demo", width=320, height=240, action_sequence_length=8)
+        # Support custom data percentage for scaling laws experiments
+        data_percentage = float(os.environ.get('EGODEX_DATA_PERCENTAGE', '1.0'))
+        return EgoDexPoseActionsTrain(data_dir=data_dir, style="demo", width=320, height=240, action_sequence_length=8, data_percentage=data_percentage)
     if "egodex_pose_test" in dataset_name:
         data_dir = os.environ.get('EGODEX_DATA_DIR', '/path/to/egodex/data')
         return EgoDexPoseActionsTest(data_dir=data_dir, style="demo", width=320, height=240, action_sequence_length=8)

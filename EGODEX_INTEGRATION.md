@@ -33,11 +33,18 @@ python scripts/prepare_egodex_data.py --output-dir /path/to/egodex --parts part1
 python scripts/prepare_egodex_data.py --output-dir /path/to/egodex --parts part1 part2 part3 part4 part5 test additional
 ```
 
-### 2. Set Environment Variable
+### 2. Set Environment Variables
 
 ```bash
 export EGODEX_DATA_DIR="/path/to/egodex/organized"
+export EGODEX_DATA_PERCENTAGE=1.0  # Use full dataset (0.25, 0.5, 1.0 for scaling laws)
+export PYTHONPATH="/path/to/molmoact:${PYTHONPATH:-}"  # Required for module imports
 ```
+
+**Environment Variables:**
+- `EGODEX_DATA_DIR`: Path to organized EgoDex data
+- `EGODEX_DATA_PERCENTAGE`: Percentage of EgoDex data to use (0.0-1.0)
+- `PYTHONPATH`: Must include MolmoAct project root for proper module imports
 
 ### 3. Compute Action Statistics
 
@@ -378,6 +385,17 @@ dataset = EgoDexPoseActions(
 )
 ```
 
+**Using Environment Variable:**
+```bash
+# Set data percentage via environment variable (used by training scripts)
+export EGODEX_DATA_PERCENTAGE=0.25  # Use 25% of data for scaling laws
+
+# Then run training - the dataset will automatically use this percentage
+python launch_scripts/train_multitask_model.py \
+    molmoact-midtrain-egodex-scaling-25pct \
+    allenai/MolmoAct-7B-D-Pretrain-0812
+```
+
 ### Key Features
 
 - **Deterministic Sampling**: Uses fixed seed (42) for reproducible results
@@ -400,6 +418,9 @@ dataset = EgoDexPoseActions(
 2. **`molmoact-midtrain-egodex-pose`**: Combine EgoDex pose-based actions with finger tips with MolmoAct mid-training data
 3. **`egodex-only`**: Original EgoDex approach (for comparison)
 4. **`molmoact-midtrain-egodex`**: Original combined approach
+5. **`molmoact-midtrain-egodex-scaling-25pct`**: Scaling laws with 25% EgoDex data (90% EgoDex batches, 10% MolmoAct batches)
+6. **`molmoact-midtrain-egodex-scaling-50pct`**: Scaling laws with 50% EgoDex data (90% EgoDex batches, 10% MolmoAct batches)
+7. **`molmoact-midtrain-egodex-scaling-100pct`**: Scaling laws with 100% EgoDex data (90% EgoDex batches, 10% MolmoAct batches)
 
 ### Training Command Examples
 
@@ -416,6 +437,45 @@ python launch_scripts/train_multitask_model.py \
     --model-config configs/molmoact_7b.yaml \
     --data-config configs/data_config.yaml
 ```
+
+### Scaling Laws Experiments
+
+For studying how performance scales with EgoDex data size, use the scaling configurations:
+
+```bash
+# Training with different EgoDex data percentages
+# All use 90% EgoDex batches + 10% MolmoAct batches
+
+# 25% EgoDex data
+torchrun --nnodes=1 --nproc-per-node=1 \
+    launch_scripts/train_multitask_model.py \
+    molmoact-midtrain-egodex-scaling-25pct allenai/MolmoAct-7B-D-Pretrain-0812 \
+    --wandb.name=egodex_scaling_25pct \
+    --save_folder=checkpoints/egodex_scaling_25pct \
+    --duration 50000
+
+# 50% EgoDex data  
+torchrun --nnodes=1 --nproc-per-node=1 \
+    launch_scripts/train_multitask_model.py \
+    molmoact-midtrain-egodex-scaling-50pct allenai/MolmoAct-7B-D-Pretrain-0812 \
+    --wandb.name=egodex_scaling_50pct \
+    --save_folder=checkpoints/egodex_scaling_50pct \
+    --duration 50000
+
+# 100% EgoDex data
+torchrun --nnodes=1 --nproc-per-node=1 \
+    launch_scripts/train_multitask_model.py \
+    molmoact-midtrain-egodex-scaling-100pct allenai/MolmoAct-7B-D-Pretrain-0812 \
+    --wandb.name=egodex_scaling_100pct \
+    --save_folder=checkpoints/egodex_scaling_100pct \
+    --duration 50000
+```
+
+**Key Features for Scaling Laws:**
+- **Fixed batch ratio**: 90% EgoDex, 10% MolmoAct across all experiments
+- **Variable data size**: 25%, 50%, 100% of total EgoDex data
+- **Controlled via environment**: `EGODEX_DATA_PERCENTAGE=0.25|0.5|1.0`
+- **Reproducible sampling**: Deterministic data subset selection
 
 ## Customization
 
@@ -479,6 +539,11 @@ left_hand_conf = confidences['leftHand']  # Shape: (N,)
 4. **Pose data processing errors**
    - Ensure HDF5 files are not corrupted
    - Check that pose data contains expected joint names
+
+5. **Module import errors (`ModuleNotFoundError: No module named 'launch_scripts'`)**
+   - Add MolmoAct project root to PYTHONPATH: `export PYTHONPATH="/path/to/molmoact:${PYTHONPATH:-}"`
+   - Ensure you're running from the correct directory
+   - Verify the virtual environment is activated
 
 ### Performance Tips
 

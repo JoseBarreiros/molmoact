@@ -322,6 +322,64 @@ if __name__ == "__main__":
                 "egodex_pose_train",
             ], 1.0],
         ]
+    # EgoDex Scaling Laws Configurations (90% EgoDex + 10% MolmoAct)
+    elif args.mixture in ["molmoact-midtrain-egodex-scaling-25pct"]:
+        # Scaling laws: 90% EgoDex (25% of available data) + 10% MolmoAct
+        tasks = [
+            ["molmoact_dataset_home_primary", [
+                "molmoact_dataset_home_primary",
+            ], 0.025],  # 2.5% each = 10% total MolmoAct
+            ["molmoact_dataset_home_secondary", [
+                "molmoact_dataset_home_secondary",
+            ], 0.025],
+            ["molmoact_dataset_tabletop_primary", [
+                "molmoact_dataset_tabletop_primary",
+            ], 0.025],
+            ["molmoact_dataset_tabletop_secondary", [
+                "molmoact_dataset_tabletop_secondary",
+            ], 0.025],
+            ["egodex_pose_train", [
+                "egodex_pose_train",
+            ], 0.9],  # 90% EgoDex with 25% of total data
+        ]
+    elif args.mixture in ["molmoact-midtrain-egodex-scaling-50pct"]:
+        # Scaling laws: 90% EgoDex (50% of available data) + 10% MolmoAct
+        tasks = [
+            ["molmoact_dataset_home_primary", [
+                "molmoact_dataset_home_primary",
+            ], 0.025],
+            ["molmoact_dataset_home_secondary", [
+                "molmoact_dataset_home_secondary",
+            ], 0.025],
+            ["molmoact_dataset_tabletop_primary", [
+                "molmoact_dataset_tabletop_primary",
+            ], 0.025],
+            ["molmoact_dataset_tabletop_secondary", [
+                "molmoact_dataset_tabletop_secondary",
+            ], 0.025],
+            ["egodex_pose_train", [
+                "egodex_pose_train",
+            ], 0.9],  # 90% EgoDex with 50% of total data
+        ]
+    elif args.mixture in ["molmoact-midtrain-egodex-scaling-100pct"]:
+        # Scaling laws: 90% EgoDex (100% of available data) + 10% MolmoAct
+        tasks = [
+            ["molmoact_dataset_home_primary", [
+                "molmoact_dataset_home_primary",
+            ], 0.025],
+            ["molmoact_dataset_home_secondary", [
+                "molmoact_dataset_home_secondary",
+            ], 0.025],
+            ["molmoact_dataset_tabletop_primary", [
+                "molmoact_dataset_tabletop_primary",
+            ], 0.025],
+            ["molmoact_dataset_tabletop_secondary", [
+                "molmoact_dataset_tabletop_secondary",
+            ], 0.025],
+            ["egodex_pose_train", [
+                "egodex_pose_train",
+            ], 0.9],  # 90% EgoDex with 100% of total data
+        ]
     elif args.mixture in ["libero-spatial"]:
         # this will be uniform sampling
         tasks = [

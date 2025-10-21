@@ -322,7 +322,7 @@ WANDB_API_KEY=<your_wandb_api_key> torchrun \
 
 #### 4.2.2 Mid-training
 
-> **Note**: For EgoDex integration, you can use `molmoact-midtrain-egodex-pose` or `egodex-pose-only` as the mixture name to train with EgoDex data. See `EGODEX_INTEGRATION.md` for detailed instructions.
+> **Note**: For EgoDex integration, you can use `molmoact-midtrain-egodex-pose`, `egodex-pose-only`, or scaling configurations (`molmoact-midtrain-egodex-scaling-{25,50,100}pct`) as the mixture name to train with EgoDex data. See `EGODEX_INTEGRATION.md` for detailed instructions.
 
 **Command**
 ```bash
