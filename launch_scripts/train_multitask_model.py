@@ -380,6 +380,20 @@ if __name__ == "__main__":
                 "egodex_pose_train",
             ], 0.9],  # 90% EgoDex with 100% of total data
         ]
+    elif args.mixture in ["molmoact-midtrain-egodex-100pct-only"]:
+        # 100% EgoDex only - no other datasets
+        tasks = [
+            ["egodex_pose_train", [
+                "egodex_pose_train",
+            ], 1.0],  # 100% EgoDex
+        ]
+    elif args.mixture in ["molmoact-midtrain-egodex-1pct-only"]:
+        # 100% EgoDex only - using only 1% of available EgoDex data for quick testing
+        tasks = [
+            ["egodex_pose_train", [
+                "egodex_pose_train",
+            ], 1.0],  # 100% EgoDex (but only 1% of total data via EGODEX_DATA_PERCENTAGE)
+        ]
     elif args.mixture in ["libero-spatial"]:
         # this will be uniform sampling
         tasks = [

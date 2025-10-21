@@ -541,19 +541,23 @@ class EgoDexPoseActions(EgoDexDataset):
     """
     
     def __init__(self, action_sequence_length: int = 8, normalize_actions: bool = True, discretize_actions: bool = True, 
-                 action_stats_file: str = None, data_percentage: float = 1.0, target_fps: int = 10, **kwargs):
+                 action_stats_file: str = None, data_percentage: float = 1.0, **kwargs):
         """
-        Initialize EgoDex dataset with pose-based actions.
+        Initialize EgoDex dataset with pose-based actions using timestep sampling and action chunking.
         
         Args:
-            action_sequence_length: Number of pose actions to generate per episode
+            action_sequence_length: Number of consecutive actions per chunk (default: 8)
             normalize_actions: Whether to normalize actions using dataset statistics
             discretize_actions: Whether to discretize actions for language model integration
             action_stats_file: Path to precomputed action statistics file (JSON)
             data_percentage: Percentage of data to use (0.0 to 1.0) for ablation studies
-            target_fps: Target FPS for downsampling (default: 10Hz from original 30Hz)
-            **kwargs: Arguments passed to parent EgoDexDataset
+            **kwargs: Arguments passed to parent EgoDexDataset (target_fps, source_fps, and timestep_sampling are ignored)
         """
+        # Filter out deprecated parameters
+        kwargs.pop('target_fps', None)
+        kwargs.pop('source_fps', None)
+        kwargs.pop('timestep_sampling', None)  # Always True now
+        
         # Validate data_percentage
         if not (0.0 <= data_percentage <= 1.0):
             raise ValueError(f"data_percentage must be between 0.0 and 1.0, got {data_percentage}")
@@ -562,11 +566,6 @@ class EgoDexPoseActions(EgoDexDataset):
         self.action_sequence_length = action_sequence_length
         self.normalize_actions = normalize_actions
         self.discretize_actions = discretize_actions
-        self.target_fps = target_fps
-        self.source_fps = 30  # EgoDex is recorded at 30Hz
-        
-        # Calculate downsampling factor
-        self.downsample_factor = max(1, self.source_fps // self.target_fps)
         
         # Initialize action statistics for normalization
         if normalize_actions:
@@ -580,6 +579,281 @@ class EgoDexPoseActions(EgoDexDataset):
         # Initialize discretization parameters
         self.n_action_bins = 256
         self.bin_centers = self._compute_bin_centers() if discretize_actions else None
+        
+        # Initialize caches for performance optimization
+        self._pose_data_cache = {}
+        self._frame_cache = {}  # Cache for video frames: (video_path, frame_index) -> PIL.Image
+        self._video_handles = {}  # Cache for video handles: video_path -> cv2.VideoCapture
+        
+        # Always build timestep index for timestep sampling
+        self._build_timestep_index()
+    
+    def __del__(self):
+        """Cleanup video handles and caches when dataset is destroyed."""
+        # Close video handles
+        for cap in self._video_handles.values():
+            if cap.isOpened():
+                cap.release()
+        self._video_handles.clear()
+        
+        # Clear caches
+        self._pose_data_cache.clear()
+        self._frame_cache.clear()
+    
+    def _build_timestep_index(self):
+        """Build index of all timesteps across episodes with frame-pose alignment verification."""
+        self.timesteps = []
+        alignment_errors = 0
+        
+        print("Building timestep index with frame-pose alignment verification...")
+        
+        for episode_idx, episode in enumerate(self.episodes):
+            try:
+                # Get frame count from video
+                cap = cv2.VideoCapture(episode['video_path'])
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
+                
+                # Get pose count from HDF5 - OPTIMIZED: only read metadata, not full data
+                total_poses = self._get_pose_count_fast(episode['pose_path'])
+                
+                # Verify alignment
+                if total_frames != total_poses:
+                    print(f"⚠️  Alignment warning: Episode {episode['episode_id']} has {total_frames} frames but {total_poses} poses")
+                    alignment_errors += 1
+                    # Use minimum to avoid out-of-bounds
+                    usable_timesteps = min(total_frames, total_poses)
+                else:
+                    usable_timesteps = total_frames
+                
+                # Add timesteps for this episode
+                for timestep in range(usable_timesteps):
+                    self.timesteps.append({
+                        'episode_idx': episode_idx,
+                        'timestep': timestep,
+                        'episode': episode
+                    })
+                    
+            except Exception as e:
+                print(f"⚠️  Error processing episode {episode['episode_id']}: {e}")
+                continue
+        
+        print(f"Built timestep index: {len(self.timesteps)} timesteps from {len(self.episodes)} episodes")
+        if alignment_errors > 0:
+            print(f"⚠️  Found {alignment_errors} episodes with frame-pose alignment issues")
+        else:
+            print("✅ All episodes verified for frame-pose alignment")
+    
+    def __len__(self):
+        """Return number of timesteps."""
+        return len(self.timesteps)
+    
+    def _get_pose_count_fast(self, pose_path: str) -> int:
+        """Get pose count from HDF5 file without loading full data - for initialization only."""
+        try:
+            with h5py.File(pose_path, 'r') as f:
+                transforms = f.get('transforms', {})
+                left_hand_poses = transforms.get('leftHand', [])
+                right_hand_poses = transforms.get('rightHand', [])
+                
+                # Use primary hand for count
+                primary_poses = right_hand_poses if len(right_hand_poses) > 0 else left_hand_poses
+                return len(primary_poses)
+        except Exception as e:
+            print(f"⚠️  Error reading pose count from {pose_path}: {e}")
+            return 0
+    
+    def _load_pose_data(self, pose_path: str) -> Dict[str, Any]:
+        """Load pose data from HDF5 file with caching for performance optimization."""
+        # Check cache first
+        if pose_path in self._pose_data_cache:
+            return self._pose_data_cache[pose_path]
+        
+        # Load from file if not in cache
+        pose_data = super()._load_pose_data(pose_path)
+        
+        # Cache the result
+        self._pose_data_cache[pose_path] = pose_data
+        
+        return pose_data
+    
+    def _get_single_frame(self, video_path: str, frame_index: int) -> Image.Image:
+        """Extract a single frame at a specific index from video file with caching."""
+        # Check cache first
+        cache_key = (video_path, frame_index)
+        if cache_key in self._frame_cache:
+            return self._frame_cache[cache_key]
+        
+        # Get or create video handle (cached)
+        if video_path not in self._video_handles:
+            self._video_handles[video_path] = cv2.VideoCapture(video_path)
+        
+        cap = self._video_handles[video_path]
+        
+        # Set frame position
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ret, frame = cap.read()
+        
+        if not ret:
+            pil_image = Image.new('RGB', (self.width or 320, self.height or 240))
+        else:
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(frame_rgb)
+            
+            # Resize if specified
+            if self.width is not None and self.height is not None:
+                pil_image = pil_image.resize((self.width, self.height), Image.BILINEAR)
+        
+        # Cache the result
+        self._frame_cache[cache_key] = pil_image
+        
+        return pil_image
+    
+    def _get_single_pose(self, pose_data: Dict[str, Any], timestep: int) -> Dict[str, Any]:
+        """Extract pose data for a single timestep."""
+        transforms = pose_data.get('transforms', {})
+        confidences = pose_data.get('confidences', {})
+        
+        single_timestep_data = {
+            'transforms': {},
+            'confidences': {},
+            'metadata': pose_data.get('metadata', {}),
+            'camera_intrinsic': pose_data.get('camera_intrinsic')
+        }
+        
+        # Extract timestep-specific transforms
+        for joint_name, joint_transforms in transforms.items():
+            if len(joint_transforms) > timestep:
+                if isinstance(joint_transforms, np.ndarray):
+                    single_timestep_data['transforms'][joint_name] = joint_transforms[timestep:timestep+1]
+                else:
+                    # Handle list case
+                    single_timestep_data['transforms'][joint_name] = [joint_transforms[timestep]]
+        
+        # Extract timestep-specific confidences if available
+        for joint_name, joint_confidences in confidences.items():
+            if len(joint_confidences) > timestep:
+                if isinstance(joint_confidences, np.ndarray):
+                    single_timestep_data['confidences'][joint_name] = joint_confidences[timestep:timestep+1]
+                else:
+                    single_timestep_data['confidences'][joint_name] = [joint_confidences[timestep]]
+        
+        return single_timestep_data
+    
+    def _get_timestep_action_chunk(self, pose_data: Dict[str, Any], start_timestep: int, description: str) -> str:
+        """Generate action chunk starting from the given timestep."""
+        transforms = pose_data.get('transforms', {})
+        
+        # Extract hand poses
+        left_hand_poses = transforms.get('leftHand', [])
+        right_hand_poses = transforms.get('rightHand', [])
+        
+        # Use primary hand (right if available, otherwise left)
+        primary_poses = right_hand_poses if len(right_hand_poses) > 0 else left_hand_poses
+        hand_name = "right" if len(right_hand_poses) > 0 else "left"
+        
+        if len(primary_poses) == 0:
+            return f"Error: No hand pose data available for chunk starting at timestep {start_timestep}"
+        
+        # Calculate chunk timesteps - ensure we don't exceed available data
+        max_timesteps = len(primary_poses)
+        chunk_timesteps = []
+        
+        if start_timestep >= max_timesteps:
+            return f"Error: Start timestep {start_timestep} exceeds available timesteps ({max_timesteps})"
+        
+        # Generate chunk timesteps
+        if max_timesteps <= self.action_sequence_length:
+            # If episode is shorter than chunk size, use all available timesteps
+            chunk_timesteps = list(range(start_timestep, min(start_timestep + max_timesteps, max_timesteps)))
+            if len(chunk_timesteps) < self.action_sequence_length:
+                # Pad with the last available timestep if needed
+                chunk_timesteps.extend([chunk_timesteps[-1]] * (self.action_sequence_length - len(chunk_timesteps)))
+        else:
+            # Generate consecutive timesteps for the chunk
+            end_timestep = min(start_timestep + self.action_sequence_length, max_timesteps)
+            chunk_timesteps = list(range(start_timestep, end_timestep))
+            
+            # If we don't have enough consecutive timesteps, pad with the last available
+            if len(chunk_timesteps) < self.action_sequence_length:
+                chunk_timesteps.extend([chunk_timesteps[-1]] * (self.action_sequence_length - len(chunk_timesteps)))
+        
+        # Get finger tip positions for the chunk timesteps
+        finger_tips = self._extract_finger_tip_positions(transforms, hand_name, chunk_timesteps)
+        
+        # Convert poses to action format (6 DOF hand + 5 finger tips * 3 = 21 DOF total)
+        actions = []
+        normalized_actions = []
+        discretized_actions = []
+        
+        for i, timestep in enumerate(chunk_timesteps):
+            if timestep < len(primary_poses):
+                pose = primary_poses[timestep]
+            else:
+                # Use last available pose if we run out
+                pose = primary_poses[-1]
+            
+            # Extract hand position (x, y, z)
+            hand_position = pose[:3, 3]
+            
+            # Extract hand rotation (convert rotation matrix to euler angles)
+            rotation_matrix = pose[:3, :3]
+            rotation = self._rotation_matrix_to_euler(rotation_matrix)
+            
+            # Combine hand pose: [x, y, z, rx, ry, rz] (no gripper state)
+            hand_action = np.concatenate([hand_position, rotation])
+            
+            # Add finger tip positions: [tip1_x, tip1_y, tip1_z, tip2_x, tip2_y, tip2_z, ...]
+            finger_action = finger_tips[i] if i < len(finger_tips) else np.zeros(15)  # 5 fingers * 3 coords
+            
+            # Combine hand pose + finger tips
+            action = np.concatenate([hand_action, finger_action])
+            actions.append(action)
+            
+            # Apply normalization and discretization if enabled
+            if self.normalize_actions:
+                normalized_action = self._normalize_action(action)
+                normalized_actions.append(normalized_action)
+            else:
+                normalized_actions.append(action)
+            
+            if self.discretize_actions:
+                discretized_action = self._discretize_action(normalized_actions[-1])
+                discretized_actions.append(discretized_action)
+            else:
+                discretized_actions.append(normalized_actions[-1])
+        
+        # Apply temporal aggregation (like LIBERO)
+        aggregated_action = self._temporal_aggregate_actions(actions)
+        
+        # Format as action sequence
+        if self.discretize_actions:
+            action_sequence = "[\n"
+            for i, action in enumerate(discretized_actions):
+                action_str = f"[{', '.join([str(x) for x in action])}]"
+                action_sequence += f"  {action_str},\n"  # action_{i+1}
+            action_sequence = action_sequence.rstrip(",\n") + "\n]"
+        else:
+            action_sequence = "[\n"
+            for i, action in enumerate(actions):
+                action_str = f"[{', '.join([f'{x:.3f}' for x in action])}]"
+                action_sequence += f"  {action_str},\n"  # action_{i+1}
+            action_sequence = action_sequence.rstrip(",\n") + "\n]"
+        
+        # Return formatted chunk response
+        return f"""Based on the egocentric visual analysis starting at timestep {start_timestep}:
+
+1. How far are the objects from the hand: {hand_name} hand analysis across {len(chunk_timesteps)} timesteps shows object manipulation trajectory.
+
+2. How does the hand move during the task: {hand_name} hand movement across the action sequence demonstrates precise manipulation path.
+
+3. How do the fingers move for precise manipulation: Finger tip positions across the chunk show manipulation sequence.
+
+Action sequence chunk ({len(chunk_timesteps)} timesteps, 21 DOF each: hand pose + finger tips):
+{action_sequence}
+
+To perform {description}, the robot should execute this sequence of hand poses and finger tip actions."""
     
     def _create_pose_action_conversation(self, task_name: str, metadata: Dict[str, Any], pose_data: Dict[str, Any]) -> Dict[str, List[str]]:
         """Create conversation format specifically for pose-based action learning."""
@@ -627,15 +901,8 @@ class EgoDexPoseActions(EgoDexDataset):
         if len(primary_poses) == 0:
             return f"Error: No hand pose data available for {description}"
         
-        # Apply downsampling first (30Hz -> target_fps)
+        # Sample poses for action sequence (no downsampling)
         n_poses = len(primary_poses)
-        if self.downsample_factor > 1:
-            # Downsample by taking every downsample_factor-th frame
-            downsampled_indices = list(range(0, n_poses, self.downsample_factor))
-            primary_poses = [primary_poses[i] for i in downsampled_indices]
-            n_poses = len(primary_poses)
-        
-        # Sample poses for action sequence from downsampled data
         if n_poses <= self.action_sequence_length:
             sampled_poses = primary_poses
             indices = list(range(n_poses))
@@ -804,15 +1071,8 @@ To perform {description}, the robot should execute these hand pose and finger ti
                 if len(primary_poses) == 0:
                     continue
                 
-                # Apply downsampling first (30Hz -> target_fps)
+                # Sample poses from this episode (no downsampling)
                 n_poses = len(primary_poses)
-                if self.downsample_factor > 1:
-                    # Downsample by taking every downsample_factor-th frame
-                    downsampled_indices = list(range(0, n_poses, self.downsample_factor))
-                    primary_poses = [primary_poses[i] for i in downsampled_indices]
-                    n_poses = len(primary_poses)
-                
-                # Sample poses from this episode (from downsampled data)
                 if n_poses <= 8:
                     sampled_poses = primary_poses
                     indices = list(range(n_poses))
@@ -994,53 +1254,69 @@ To perform {description}, the robot should execute these hand pose and finger ti
         return np.array([x, y, z])
     
     def get(self, item: int, rng: np.random.RandomState) -> Dict[str, Any]:
-        """Get a single episode with pose-based actions."""
-        episode = self.episodes[item]
+        """Get a single timestep with pose-based action chunk starting from that timestep."""
+        # Get single timestep
+        timestep_info = self.timesteps[item]
+        episode = timestep_info['episode']
+        timestep = timestep_info['timestep']
         
-        # Load video frames
-        frames = self._extract_frames(episode['video_path'], self.max_frames)
+        # Load single frame
+        frame = self._get_single_frame(episode['video_path'], timestep)
         
         # Load pose data
         pose_data = self._load_pose_data(episode['pose_path'])
         
-        # Create pose-based action conversation
-        conversation = self._create_pose_action_conversation(episode['task_name'], pose_data['metadata'], pose_data)
+        # Get single timestep pose data
+        single_timestep_pose = self._get_single_pose(pose_data, timestep)
         
-        # Use egocentric frame as observation
-        primary_image = frames[0] if frames else Image.new('RGB', (self.width or 320, self.height or 240))
+        # Create conversation for single timestep
+        description = pose_data['metadata'].get('llm_description', f"Perform the {episode['task_name']} task")
         
-        # Create annotation
+        # Handle reversible tasks
+        if 'which_llm_description' in pose_data['metadata']:
+            which_desc = pose_data['metadata']['which_llm_description']
+            if which_desc == 2 and 'llm_description2' in pose_data['metadata']:
+                description = pose_data['metadata']['llm_description2']
+        
+        question = (
+            f"The task is {description}. "
+            "What is the action that the robot should take. "
+            f"To figure out the action that the robot should take to {description}, "
+            "let's think through it step by step. "
+            "First, how far are the objects from the hand? "
+            "Second, how does the hand move during the task? "
+            "Third, how do the fingers move for precise manipulation? "
+            "Based on the distance, hand movement, and finger control, "
+            "what actions should the robot take?"
+        )
+        
+        # Generate action chunk starting from the current timestep
+        answer = self._get_timestep_action_chunk(pose_data, timestep, description)
+        
+        # Create annotation for action chunk
         annotation = {
             'task_name': episode['task_name'],
             'episode_id': episode['episode_id'],
-            'action_type': 'pose_based_with_fingertips_enhanced',
+            'timestep': timestep,
             'action_sequence_length': self.action_sequence_length,
-            'action_dof': 21,  # 6 DOF hand + 15 DOF finger tips
+            'action_type': 'pose_based_chunk',
+            'action_dof': 21,  # 6 DOF hand + 15 DOF finger tips per timestep
             'action_processing': {
                 'chunking': True,
-                'temporal_aggregation': True,
                 'normalization': self.normalize_actions,
                 'discretization': self.discretize_actions,
                 'n_action_bins': self.n_action_bins if self.discretize_actions else None
             },
-            'hand_poses': {
-                'left': pose_data.get('transforms', {}).get('leftHand', []),
-                'right': pose_data.get('transforms', {}).get('rightHand', [])
-            },
-            'finger_tips': {
-                'left': self._extract_finger_tip_positions(pose_data.get('transforms', {}), 'left', list(range(len(pose_data.get('transforms', {}).get('leftHand', []))))),
-                'right': self._extract_finger_tip_positions(pose_data.get('transforms', {}), 'right', list(range(len(pose_data.get('transforms', {}).get('rightHand', [])))))
-            },
-            'action_stats': self.action_stats,
-            'pose_data': pose_data
+            'pose_data': single_timestep_pose  # Still include single timestep pose for reference
         }
         
         return {
             'style': self.style,
-            'image': [primary_image],  # Egocentric observation
-            'question': conversation['value'][0],
-            'answers': conversation['value'][1],
-            'annotation': annotation
+            'image': [frame],  # Single frame observation
+            'question': question,
+            'answers': answer,
+            'annotation': annotation,
+            'description': description,  # Add the task description
         }
 
 
